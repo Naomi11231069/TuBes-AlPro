@@ -2,6 +2,7 @@ import sys
 import sqlite3
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QListWidget, QMessageBox, QDialog, QLabel, QTimeEdit, QListWidgetItem, QDateTimeEdit
 from PyQt5.QtCore import Qt, QTimer, QTime, QVariant, QDateTime
+from PyQt5.QtGui import QIcon, QFont
 from playsound import playsound
 from datetime import timedelta
 
@@ -10,7 +11,7 @@ class CountdownTimer(QDialog):
         super().__init__()
 
         self.setWindowTitle('Countdown Timer')
-        self.setGeometry(200, 200, 300, 150)
+        self.setGeometry(400, 400, 300, 200)
 
         self.time_left = None
         self.timer = QTimer()
@@ -71,13 +72,20 @@ class CountdownTimer(QDialog):
 class ToDoListApp(QWidget):
     def __init__(self):
         super().__init__()
+        try:
+            # Membuat koneksi ke database
+            self.connection = sqlite3.connect('todolist.db')
+            self.create_table()
 
-        # Membuat koneksi ke database
-        self.connection = sqlite3.connect('todolist.db')
-        self.create_table()
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, 'Kesalahan Database', f'Terdapat kesalahan saat membuka database: {str(e)}')
+            sys.exit(1)
 
         self.task_counter = 1
         self.input_text = ""
+
+        # Set ukuran tetap jendela
+        self.setMinimumSize(600, 400)
 
         self.initUI()
 
@@ -130,7 +138,6 @@ class ToDoListApp(QWidget):
         # Menghapus tugas yang telah diselesaikan dari database berdasarkan ID
         with self.connection:
             self.connection.execute('DELETE FROM completed_tasks WHERE id = ?', (task_id,))
-         
 
     def create_table(self):
         # Membuat tabel 'completed_tasks' jika belum ada
@@ -148,11 +155,32 @@ class ToDoListApp(QWidget):
         with self.connection:
             self.connection.execute('INSERT INTO completed_tasks (task) VALUES (?)', (task,))
 
+    def update_date_label(self):
+        current_datetime = QDateTime.currentDateTime()
+        date_text = current_datetime.toString('dddd, dd MMMM yyyy - hh:mm:ss')
+        self.date_label.setText(date_text)
+
     def initUI(self):
         layout = QVBoxLayout()
 
         self.setWindowTitle('Aplikasi To-Do List')
         self.setGeometry(100, 100, 400, 300)
+
+        title_label = QLabel('STUDYMATE', self)
+
+        title_gradient = 'QLabel { color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00BFFF, stop:1 #000080); background-color: transparent; }'
+        title_label.setStyleSheet(title_gradient)
+
+        font = QFont('Sacramento', 20, QFont.Bold)
+        title_label.setFont(font)
+
+        title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label)
+
+        # Tambahkan label untuk menampilkan hari, tanggal, bulan, dan tahun
+        self.date_label = QLabel(self)
+        self.date_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.date_label)
 
         self.task_list = QListWidget(self)
         self.task_input = None
@@ -202,6 +230,11 @@ class ToDoListApp(QWidget):
         layout.addLayout(button_layout)
         self.setLayout(layout)
 
+        # Mulai timer untuk memperbarui label setiap detik
+        self.date_timer = QTimer(self)
+        self.date_timer.timeout.connect(self.update_date_label)
+        self.date_timer.start(1000)
+
         self.load_tasks()
         self.task_list.itemSelectionChanged.connect(self.check_selection)
 
@@ -210,13 +243,13 @@ class ToDoListApp(QWidget):
             self.task_input = QLineEdit(self)
             self.task_input.setPlaceholderText('Tambahkan tugas...')
             layout = self.layout()
-            layout.insertWidget(1, self.task_input)
+            layout.insertWidget(2, self.task_input)
 
             # input untuk deadline
             self.deadline_input = QDateTimeEdit(self)
             self.deadline_input.setDisplayFormat('dd/MM/yyyy hh:mm')
             self.deadline_input.setDateTime(QDateTime.currentDateTime())  # Set default ke waktu sekarang
-            layout.insertWidget(2, self.deadline_input)
+            layout.insertWidget(3, self.deadline_input)
 
             self.add_button.setText('Simpan')
             self.add_button.clicked.disconnect(self.show_task_input)
@@ -225,7 +258,7 @@ class ToDoListApp(QWidget):
             self.add_task()
 
     def add_task(self):
-        if self.task_input is not None:
+        if self.task_input is not None and self.deadline_input is not None:
             self.input_text = self.task_input.text()
             self.task_input.deleteLater()
             self.task_input = None
@@ -259,19 +292,8 @@ class ToDoListApp(QWidget):
             else:
                 QMessageBox.critical(self, 'Kesalahan', 'Tidak dapat menambahkan tugas kosong.')
 
-    def remove_deadline_from_task(self, task):
-        with open('todolist.txt', 'r') as f:
-            lines = f.readlines()
-        with open('todolist.txt', 'w') as f:
-            for line in lines:
-                if not line.startswith(f'{task}. '):
-                    f.write(line)
-
-    def get_deadline_from_task(self, task):
-        parts = task.split('. ')
-        if len(parts) > 2:
-            return parts[2]
-        return None
+        else:
+            QMessageBox.critical(self, 'Kesalahan', 'Pastikan untuk mengisi tugas dan deadline.')
 
     def remove_task(self):
         selected_item = self.task_list.currentItem()
@@ -339,9 +361,13 @@ class ToDoListApp(QWidget):
     def open_timer_window(self):
         selected_item = self.task_list.currentItem()
         if selected_item is not None:
-            deadline = self.get_deadline(selected_item)
-            timer_window = CountdownTimer(deadline)
-            timer_window.exec_()
+            try:
+                deadline = self.get_deadline(selected_item)
+                timer_window = CountdownTimer(deadline)
+                timer_window.exec_()
+
+            except Exception as e:
+                QMessageBox.critical(self, 'Kesalahan', f'Terdapat kesalahan saat membuka jendela timer: {str(e)}')
 
     def set_deadline(self, item, deadline):
         item.setData(Qt.UserRole, QVariant(deadline))
@@ -360,13 +386,18 @@ class ToDoListApp(QWidget):
         return False
 
     def activate_deadline_alert(self):
-        playsound('./alarm.mp3')
+        try:
+            playsound('./alarm.mp3')
+        except Exception as e:
+            QMessageBox.warning(self, 'Peringatan', f'Tidak dapat memutar suara alarm: {str(e)}')
 
 def main():
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon('todolist.jpg'))
     ex = ToDoListApp()
     ex.show()
     sys.exit(app.exec_())
 
 if __name__ == '__main__':
     main()
+
